@@ -6,11 +6,12 @@ import {
   useQuery,
   useQueryClient,
 } from "@tanstack/react-query";
-import { Download, Loader2, Sheet } from "lucide-react";
+import { Download, Loader2, RefreshCw, Sheet } from "lucide-react";
 import { toast } from "sonner";
 import { TableExportMenu } from "@/client/components/table/TableBulkActionBar";
 import { TablePagination } from "@/client/components/table/TablePagination";
 import { SearchConsoleConnectionCard } from "@/client/features/gsc/SearchConsoleConnectionCard";
+import { SearchPerformanceEmptyState } from "@/client/features/search-performance/SearchPerformanceEmptyState";
 import { SearchPerformanceLoadingState } from "@/client/features/search-performance/SearchPerformanceLoadingState";
 import {
   DimensionTable,
@@ -22,12 +23,17 @@ import {
   type ExportTarget,
   type Tab,
 } from "@/client/features/search-performance/SearchPerformanceParts";
+import {
+  getSearchPerformanceEmptyKind,
+  hasSearchPerformanceData,
+} from "@/client/features/search-performance/SearchPerformanceState";
 import { getStandardErrorMessage } from "@/client/lib/error-messages";
 import {
   exportSearchPerformanceTable,
   getSearchPerformanceReport,
   getSearchPerformanceTable,
 } from "@/serverFunctions/searchPerformance";
+import { getGscConnection } from "@/serverFunctions/gsc";
 import {
   GSC_DEVICES,
   SEARCH_PERFORMANCE_DEFAULT_PAGE_SIZE,
@@ -145,12 +151,18 @@ export function SearchPerformancePage({ projectId }: { projectId: string }) {
     placeholderData: keepPreviousData,
   });
   const report = reportQuery.data;
+  const connectionQuery = useQuery({
+    queryKey: ["gscConnection", projectId],
+    queryFn: () => getGscConnection({ data: { projectId } }),
+  });
+  const hasData =
+    report?.connected === true && hasSearchPerformanceData(report.totals);
 
   const isTableTab = tab === "queries" || tab === "pages";
   const dimension = tabDimension(tab);
   const tableQuery = useQuery({
     ...tableQueryOptions(projectId, dimension, page, pageSize, filterInput),
-    enabled: report?.connected === true && isTableTab,
+    enabled: hasData && isTableTab,
     placeholderData: keepPreviousData,
   });
   const tableData = tableQuery.data;
@@ -160,7 +172,7 @@ export function SearchPerformancePage({ projectId }: { projectId: string }) {
   // Warm the Queries tab (first page) as soon as the report connects so the tab
   // opens instantly instead of showing a spinner. Free first-party GSC data.
   useEffect(() => {
-    if (report?.connected !== true) return;
+    if (!hasData) return;
     void queryClient.prefetchQuery(
       tableQueryOptions(
         projectId,
@@ -170,7 +182,7 @@ export function SearchPerformancePage({ projectId }: { projectId: string }) {
         buildFilterInput(range, device, country),
       ),
     );
-  }, [report?.connected, projectId, range, device, country, queryClient]);
+  }, [hasData, projectId, range, device, country, queryClient]);
 
   const handleExport = async (target: ExportTarget) => {
     if (!report?.connected) return;
@@ -188,6 +200,16 @@ export function SearchPerformancePage({ projectId }: { projectId: string }) {
     }
   };
 
+  const refreshPerformance = () => {
+    void Promise.all([
+      reportQuery.refetch(),
+      connectionQuery.refetch(),
+      queryClient.invalidateQueries({
+        queryKey: ["searchPerformanceTable", projectId],
+      }),
+    ]);
+  };
+
   return (
     <div className="px-4 py-4 pb-24 overflow-auto md:px-6 md:py-6 md:pb-8">
       <div className="mx-auto max-w-7xl space-y-4">
@@ -199,18 +221,35 @@ export function SearchPerformancePage({ projectId }: { projectId: string }) {
               Google Search Console.
             </p>
           </div>
-          {report?.connected ? (
-            <Link
-              to="/p/$projectId/settings/integrations"
-              params={{ projectId }}
-              className="link link-hover shrink-0 self-start text-sm font-medium text-base-content/60 transition-colors hover:text-base-content sm:mt-1"
-            >
-              Change property
-            </Link>
+          {report?.connected && hasData ? (
+            <div className="flex flex-wrap items-center gap-1">
+              <button
+                type="button"
+                className="btn btn-ghost btn-sm gap-1"
+                onClick={refreshPerformance}
+                disabled={reportQuery.isFetching}
+              >
+                <RefreshCw
+                  className={`size-3.5 ${reportQuery.isFetching ? "animate-spin" : ""}`}
+                  aria-hidden="true"
+                />
+                Refresh
+              </button>
+              <Link
+                to="/p/$projectId/settings/integrations"
+                params={{ projectId }}
+                className="link link-hover shrink-0 self-start text-sm font-medium text-base-content/60 transition-colors hover:text-base-content sm:mt-1"
+              >
+                Change property
+              </Link>
+            </div>
           ) : null}
         </div>
 
-        {reportQuery.isPending ? (
+        {reportQuery.isPending ||
+        (report?.connected === true &&
+          !hasData &&
+          connectionQuery.isPending) ? (
           <SearchPerformanceLoadingState />
         ) : reportQuery.isError ? (
           <div className="alert alert-error">
@@ -222,6 +261,25 @@ export function SearchPerformancePage({ projectId }: { projectId: string }) {
           <div className="max-w-2xl">
             <SearchConsoleConnectionCard projectId={projectId} />
           </div>
+        ) : !hasData ? (
+          <SearchPerformanceEmptyState
+            projectId={projectId}
+            kind={getSearchPerformanceEmptyKind({
+              connectedAt: connectionQuery.data?.connectedAt,
+              checkedAt: reportQuery.dataUpdatedAt,
+            })}
+            siteUrl={connectionQuery.data?.siteUrl}
+            connectedAt={connectionQuery.data?.connectedAt}
+            checkedAt={reportQuery.dataUpdatedAt}
+            rangeLabel={RANGE_LABELS[range]}
+            isRefreshing={reportQuery.isFetching || connectionQuery.isFetching}
+            onRefresh={refreshPerformance}
+            onTryLongerRange={
+              range === "last_3_months"
+                ? undefined
+                : () => setRange("last_3_months")
+            }
+          />
         ) : (
           <>
             <TotalsCards report={report} />

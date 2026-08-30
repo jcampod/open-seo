@@ -51,7 +51,7 @@ export const getGscConnection = createServerFn({ method: "POST" })
       googleOAuthConfigured: hosted || gscConfigured,
       siteUrl: connection?.siteUrl ?? null,
       connectedByEmail: connection?.connectedAccountEmail ?? null,
-      connectedAt: connection?.createdAt ?? null,
+      connectedAt: connection?.updatedAt ?? connection?.createdAt ?? null,
     };
   });
 
