@@ -50,6 +50,8 @@ declare namespace Cloudflare {
     OPENROUTER_API_KEY?: string;
     // Optional OpenRouter model slug override (defaults in openrouter.ts).
     OPENROUTER_MODEL?: string;
+    // Self-host only: repeat this project's latest site audit every week.
+    SCHEDULED_SITE_AUDIT_PROJECT_ID?: string;
   }
 }
 
